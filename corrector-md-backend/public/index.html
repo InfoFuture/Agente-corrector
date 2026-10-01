@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Corrector de Mecánicas</title>
+<style>
+  :root {
+    --bg:#0e1113;--bg-panel:#15191c;--bg-panel-2:#1b2124;--steel:#3a4448;--steel-light:#55636a;
+    --text:#e8ebec;--text-dim:#9aa5aa;--accent:#d9762b;--accent-dim:#7a4420;--bad:#c96a5a;--radius:3px;
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html,body { height:100%; margin:0; background:var(--bg); color:var(--text); }
+  body { display:flex; flex-direction:column; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
+  .wrap { max-width:720px; margin:0 auto; width:100%; height:100%; display:flex; flex-direction:column; padding:0 16px; }
+  header { padding:14px 4px; border-bottom:1px solid var(--steel); flex-shrink:0; }
+  h1 { font-size:16px; margin:0; font-weight:650; }
+  main { flex:1; overflow-y:auto; padding:14px 4px 8px 4px; display:flex; flex-direction:column; gap:12px; }
+  .msg { max-width:88%; padding:10px 13px; border-radius:var(--radius); font-size:14.5px; line-height:1.55; white-space:pre-wrap; word-wrap:break-word; }
+  .msg.system { align-self:center; max-width:100%; background:transparent; color:var(--text-dim); font-size:12.5px; text-align:center; }
+  .msg.user { align-self:flex-end; background:var(--accent); color:#1a1006; }
+  .msg.agent { align-self:flex-start; background:var(--bg-panel); border:1px solid var(--steel); color:var(--text); }
+  .typing { align-self:flex-start; display:flex; gap:4px; padding:10px 13px; }
+  .typing span { width:6px;height:6px;border-radius:50%;background:var(--steel-light); animation:blink 1.2s infinite ease-in-out; }
+  .typing span:nth-child(2){animation-delay:.2s} .typing span:nth-child(3){animation-delay:.4s}
+  @keyframes blink {0%,80%,100%{opacity:.25} 40%{opacity:1}}
+  footer { padding:10px 4px calc(12px + env(safe-area-inset-bottom,0px)) 4px; border-top:1px solid var(--steel); flex-shrink:0; }
+  .attachments { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+  .chip { display:flex; align-items:center; gap:6px; background:var(--bg-panel-2); border:1px solid var(--steel); border-radius:var(--radius); padding:4px 8px; font-size:12px; color:var(--text-dim); }
+  .chip .x { cursor:pointer; color:var(--bad); font-weight:700; }
+  .inputrow { display:flex; gap:8px; align-items:flex-end; background:var(--bg-panel); border:1px solid var(--steel); border-radius:var(--radius); padding:8px; }
+  button.attach { background:transparent; border:none; color:var(--text-dim); font-size:18px; cursor:pointer; padding:6px 4px; }
+  textarea { flex:1; background:transparent; border:none; outline:none; resize:none; color:var(--text); font-size:14.5px; font-family:inherit; max-height:110px; padding:4px 0; }
+  button.send { background:var(--accent); color:#1a1006; border:none; border-radius:var(--radius); padding:9px 14px; font-size:13px; font-weight:600; cursor:pointer; }
+  button.send:disabled { opacity:.4; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>⚙️ Corrector de Mecánicas — Máster en Mecánica Digital</h1></header>
+  <main id="chat"></main>
+  <footer>
+    <div class="attachments" id="attachRow"></div>
+    <div class="inputrow">
+      <button class="attach" id="attachBtn" title="Adjuntar imagen, PDF o Word">📎</button>
+      <input type="file" id="fileInput" multiple accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.txt,.md,image/svg+xml" style="display:none">
+      <textarea id="input" rows="1" placeholder="Describe tu ejercicio o adjunta una foto/documento..."></textarea>
+      <button class="send" id="sendBtn">Enviar</button>
+    </div>
+  </footer>
+</div>
+<script>
+// Ajusta esto si el backend no se sirve desde el mismo origen que este HTML
+const API_URL = '/api/correct';
+
+let attachments = [];
+const loadedScripts = {};
+function loadScript(src){ if(loadedScripts[src]) return loadedScripts[src]; loadedScripts[src]=new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=()=>res();s.onerror=()=>rej(new Error('No se pudo cargar '+src));document.head.appendChild(s);}); return loadedScripts[src]; }
+async function ensurePdfJs(){ if(window.pdfjsLib) return window.pdfjsLib; await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'); window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; return window.pdfjsLib; }
+async function ensureMammoth(){ if(window.mammoth) return window.mammoth; await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth.js/1.6.0/mammoth.browser.min.js'); return window.mammoth; }
+const MAX_DOC_WORDS = 3000;
+async function extractPdfText(file){ const lib=await ensurePdfJs(); const buf=await file.arrayBuffer(); const doc=await lib.getDocument({data:buf}).promise; let out=''; const n=Math.min(doc.numPages,30); for(let i=1;i<=n;i++){const p=await doc.getPage(i); const c=await p.getTextContent(); out+=c.items.map(it=>it.str).join(' ')+'\n\n'; if(out.split(/\s+/).length>MAX_DOC_WORDS) break;} const w=out.split(/\s+/); return w.length>MAX_DOC_WORDS? w.slice(0,MAX_DOC_WORDS).join(' ')+' [...]':out; }
+async function extractDocxText(file){ const m=await ensureMammoth(); const buf=await file.arrayBuffer(); const r=await m.extractRawText({arrayBuffer:buf}); const w=(r.value||'').split(/\s+/); return w.length>MAX_DOC_WORDS? w.slice(0,MAX_DOC_WORDS).join(' ')+' [...]':r.value; }
+async function extractPlainText(file){ const t=await file.text(); const w=t.split(/\s+/); return w.length>MAX_DOC_WORDS? w.slice(0,MAX_DOC_WORDS).join(' ')+' [...]':t; }
+function fileToBase64(file){ return new Promise((res,rej)=>{const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=rej; r.readAsDataURL(file);}); }
+function kindOf(file){ const name=(file.name||'').toLowerCase(); if(file.type.startsWith('image/')&&file.type!=='image/svg+xml') return 'image'; if(file.type==='application/pdf'||name.endsWith('.pdf')) return 'pdf'; if(name.endsWith('.docx')) return 'docx'; if(name.endsWith('.txt')||name.endsWith('.md')) return 'text'; return 'unknown'; }
+
+const chatEl=document.getElementById('chat'), inputEl=document.getElementById('input'), sendBtn=document.getElementById('sendBtn'),
+      attachBtn=document.getElementById('attachBtn'), fileInput=document.getElementById('fileInput'), attachRow=document.getElementById('attachRow');
+
+function addMsg(role,text){ const d=document.createElement('div'); d.className='msg '+role; d.textContent=text; chatEl.appendChild(d); chatEl.scrollTop=chatEl.scrollHeight; }
+function addTyping(){ const d=document.createElement('div'); d.className='typing'; d.id='typingIndicator'; d.innerHTML='<span></span><span></span><span></span>'; chatEl.appendChild(d); chatEl.scrollTop=chatEl.scrollHeight; }
+function removeTyping(){ const t=document.getElementById('typingIndicator'); if(t) t.remove(); }
+function renderAttachments(){ attachRow.innerHTML=''; attachments.forEach(a=>{ const c=document.createElement('div'); c.className='chip'; const n=document.createElement('span'); n.textContent=(a.status==='processing'?'⏳ ':a.status==='error'?'⚠️ ':'📎 ')+a.file.name; const x=document.createElement('span'); x.className='x'; x.textContent='✕'; x.onclick=()=>{attachments=attachments.filter(a2=>a2.id!==a.id); renderAttachments();}; c.appendChild(n); c.appendChild(x); attachRow.appendChild(c); }); }
+async function handleFiles(list){ for(const file of Array.from(list)){ const kind=kindOf(file); if(kind==='unknown'){ addMsg('system','Tipo no admitido: '+file.name); continue; } const entry={id:Math.random().toString(36).slice(2),file,kind,status:'processing'}; attachments.push(entry); renderAttachments(); try{ if(kind==='image'){ entry.base64=await fileToBase64(file); entry.mediaType=file.type; } else if(kind==='pdf'){ entry.extractedText=await extractPdfText(file); } else if(kind==='docx'){ entry.extractedText=await extractDocxText(file); } else if(kind==='text'){ entry.extractedText=await extractPlainText(file); } entry.status='ready'; }catch(e){ entry.status='error'; addMsg('system','No se pudo leer '+file.name+': '+(e.message||e)); } renderAttachments(); } }
+attachBtn.addEventListener('click',()=>fileInput.click());
+fileInput.addEventListener('change',()=>{ if(fileInput.files.length) handleFiles(fileInput.files); fileInput.value=''; });
+
+let history=[]; // [{role,content}], se envia al backend tal cual (el backend añade el material de apoyo)
+
+function autoresize(){ inputEl.style.height='auto'; inputEl.style.height=Math.min(inputEl.scrollHeight,110)+'px'; }
+inputEl.addEventListener('input',autoresize);
+inputEl.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } });
+sendBtn.addEventListener('click',send);
+
+addMsg('system','Cuéntame qué ejercicio has hecho o qué has observado, o adjunta una foto/documento con el clip.');
+
+async function send(){
+  const text=inputEl.value.trim();
+  if(attachments.some(a=>a.status==='processing')){ addMsg('system','Espera a que termine de procesar el adjunto...'); return; }
+  const usable=attachments.filter(a=>a.status==='ready');
+  if(!text && usable.length===0) return;
+
+  let userMessage = text || '(el alumno no ha escrito texto, solo ha adjuntado un archivo)';
+  usable.filter(a=>a.extractedText).forEach(a=>{ userMessage += `\n\n[Documento adjunto: ${a.file.name}]\n${a.extractedText}`; });
+  const images = usable.filter(a=>a.base64).map(a=>({data:a.base64, media_type:a.mediaType}));
+  if(images.length) userMessage += `\n\n[El alumno tambien ha adjuntado ${images.length} imagen(es). Analizalas como parte del ejercicio.]`;
+
+  addMsg('user', text || '(archivo adjunto)');
+  history.push({role:'user', content:userMessage});
+  inputEl.value=''; autoresize(); attachments=[]; renderAttachments();
+  sendBtn.disabled=true; attachBtn.disabled=true; addTyping();
+
+  try{
+    const resp = await fetch(API_URL, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ history, images: images.length?images:undefined }),
+    });
+    const data = await resp.json();
+    removeTyping();
+    if(!resp.ok){ addMsg('system', data.message || 'Error del servidor.'); return; }
+    addMsg('agent', data.text);
+    history.push({role:'assistant', content:data.text});
+  }catch(e){
+    removeTyping();
+    addMsg('system','No se pudo conectar con el corrector. Inténtalo de nuevo.');
+  }finally{
+    sendBtn.disabled=false; attachBtn.disabled=false;
+  }
+}
+</script>
+</body>
+</html>
