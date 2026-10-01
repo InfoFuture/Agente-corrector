@@ -13,12 +13,12 @@ const Anthropic = require('@anthropic-ai/sdk');
 
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5'; // ajustar segun docs vigentes / coste deseado
-const EFFORT = process.env.ANTHROPIC_EFFORT || 'low'; // low basta para respuestas cortas de chat y abarata el coste
+const EFFORT = process.env.ANTHROPIC_EFFORT || 'medium'; // low | medium | high: mas esfuerzo = mas calidad y mas coste
 const MAX_OUTPUT_TOKENS = 4000; // incluye el razonamiento del modelo; con 1000 la respuesta podia salir cortada o vacia
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*'; // el widget llama a la API desde su propio dominio (iframe), no desde Kajabi
 // dominios que pueden embeber el widget en un iframe (separados por espacios)
 const FRAME_ANCESTORS = process.env.FRAME_ANCESTORS || 'https://instituto.mecanicadigital.com https://mecanicadigital.com';
-const RATE_LIMIT_PER_HOUR = parseInt(process.env.RATE_LIMIT_PER_HOUR || '30', 10); // mensajes por IP y hora
+const RATE_LIMIT_PER_HOUR = parseInt(process.env.RATE_LIMIT_PER_HOUR || '15', 10); // mensajes por IP y hora
 const MAX_HISTORY_TURNS = 8;
 const TOTAL_PROMPT_BUDGET_BYTES = 58000; // margen bajo el limite real de ~200K tokens; conservador a proposito
 

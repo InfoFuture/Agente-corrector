@@ -35,10 +35,10 @@ Variables de entorno necesarias:
 ```
 ANTHROPIC_API_KEY=sk-ant-...          # la clave de MD en la Anthropic Console
 ANTHROPIC_MODEL=claude-sonnet-5-5     # o el modelo que decidáis usar
-ANTHROPIC_EFFORT=low                  # opcional: low | medium | high (más esfuerzo = más coste)
+ANTHROPIC_EFFORT=medium                 # opcional: low | medium | high (más esfuerzo = más coste)
 ALLOWED_ORIGIN=https://<dominio-del-servidor>   # el widget llama a la API desde su propio dominio
 FRAME_ANCESTORS="https://instituto.mecanicadigital.com https://mecanicadigital.com"  # opcional: webs que pueden embeber el iframe
-RATE_LIMIT_PER_HOUR=30                # opcional: mensajes por IP y hora
+RATE_LIMIT_PER_HOUR=15                # opcional: mensajes por IP y hora
 PORT=3000                              # opcional, lo suele fijar el propio host
 ```
 
