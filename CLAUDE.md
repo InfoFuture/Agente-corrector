@@ -9,7 +9,9 @@ Chat web para las alumnas del **Máster en Mecánica Digital** (MD, una de las L
 - **Corrige ejercicios** (flujogramas, estructura de datos, requerimientos, MoSCoW, mapa de sistemas, presupuestos, observación de funnels…) en modo **socrático**: localiza el primer fallo y pregunta, no da la solución.
 - **Resuelve dudas** del máster y de la profesión (Make, Zapier, Kajabi, ActiveCampaign, APIs, webhooks, funnels, clientes…) de forma **directa**, como una tutora.
 
-Prioriza la metodología de Alba (transcripciones en `kb_docs.json`) y, cuando no cubre el tema, usa el conocimiento general de Claude. Lo ajeno al máster (recetas, política…) lo redirige con amabilidad.
+Al **corregir** usa exclusivamente el método de Alba: sus reglas, sus preguntas y su vocabulario, recorriendo la secuencia de corrección de cada tipo de ejercicio. Tiene prohibido meter conceptos ajenos al método. El conocimiento general de Claude solo se usa para **dudas** de herramientas o conceptos técnicos que el método no cubre. Lo ajeno al máster (recetas, política…) lo redirige con amabilidad.
+
+> Contexto (8/10/2026): Alba se quejó de que el corrector "corregía como una IA cualquiera" y usaba palabras que no salen en la metodología. Causa: solo llegaba al modelo una ficha por pregunta, y el prompt le daba libertad para usar conocimiento general también al corregir. Desde entonces, las 5 fichas van siempre enteras en el system y el prompt prohíbe salirse del método al corregir. **No vuelvas a dar libertad de conocimiento general en las correcciones.**
 
 Se embebe en Kajabi mediante un iframe. Llama a la API de Anthropic con la clave de MD, no con la de la alumna.
 
@@ -32,7 +34,7 @@ Railway **no** está conectado a GitHub: los despliegues se hacen a mano con `ra
 ```
 corrector-md-backend/
   server.js          # Express: prompt del sistema, recuperación de conocimiento, POST /api/correct, seguridad
-  kb_docs.json       # 33 fuentes de Alba: 5 "sesion" (fichas de corrección) + 28 "clase" (transcripciones)
+  kb_docs.json       # 33 fuentes de Alba: 5 "sesion" (fichas de corrección, SIEMPRE en el system) + 28 "clase" (transcripciones, se recuperan por pregunta)
   public/index.html  # widget de chat (HTML + CSS + JS en un único archivo, sin build)
   package.json       # express, cors, express-rate-limit, @anthropic-ai/sdk 0.27
   README.md          # instrucciones originales de despliegue, Kajabi y actualización de la base de conocimiento
@@ -42,9 +44,9 @@ corrector-md-backend.zip  # entrega original del proyecto (referencia, no se usa
 ### Cómo funciona `server.js`
 
 1. Recibe `{ history: [{role, content}], images?: [{data, media_type}] }`. Usa solo los últimos 8 turnos.
-2. `retrieveSupport()` puntúa los documentos de `kb_docs.json` por palabras clave (las `"sesion"` pesan más) y añade **como máximo 2 documentos** (unos 38 KB) al **último** mensaje de la alumna, como bloque `MATERIAL DE APOYO`.
-3. `SYSTEM_PROMPT` va en el bloque `system` con `cache_control: ephemeral`.
-4. Llama a `anthropic.messages.create` con `max_tokens: 4000` y `output_config: { effort }`. Si la respuesta llega sin texto, devuelve un 502 con un mensaje para la alumna.
+2. **Fichas de corrección:** las 5 entradas `"sesion"` de `kb_docs.json` se concatenan detrás de `SYSTEM_PROMPT` en `SYSTEM_TEXT` (unos 75.000 tokens). Ese bloque va en `system` con `cache_control: { type: 'ephemeral', ttl: '1h' }`. Cada ficha tiene reglas, "preguntas del corrector", errores típicos y la **secuencia de corrección** por tipo de ejercicio. El prompt obliga a recorrer esa secuencia y a usar sus frases.
+3. **Fragmentos de clase:** `retrieveSupport()` puntúa por palabras clave **solo las entradas `"clase"`** y añade como máximo 2 (unos 20 KB, `CLASS_SUPPORT_BYTES`) al **último** mensaje de la alumna, como bloque `FRAGMENTOS DE CLASE`. El historial más los fragmentos se recortan si pasan de `MESSAGES_BUDGET_BYTES` (60 KB).
+4. Llama a `anthropic.messages.create` con `max_tokens: 4000` y `output_config: { effort }`. Escribe en el log una línea `uso {...}` con los tokens de entrada, de caché (lectura y escritura) y de salida. Si la respuesta llega sin texto, devuelve un 502 con un mensaje para la alumna.
 5. Seguridad:
    - cabecera `Content-Security-Policy: frame-ancestors` (solo los dominios de MD pueden embeber el iframe);
    - límite de mensajes por IP con `express-rate-limit` (`trust proxy` activado por el proxy de Railway);
@@ -83,8 +85,9 @@ railway variable set --service corrector-mecanicas CLAVE=valor
 
 ### Cambiar el comportamiento del corrector
 
-Edita `SYSTEM_PROMPT` en `server.js`. Reglas que conviene mantener:
-- No mencionar "material de apoyo" ni números de sesión internos a la alumna (la numeración interna no coincide con la del máster).
+Edita `SYSTEM_PROMPT` en `server.js`. Si es una regla del método, mejor edítala en la ficha correspondiente de `kb_docs.json`. Reglas que conviene mantener:
+- Al corregir: solo el método de Alba, siguiendo la secuencia de corrección de la ficha, con sus preguntas literales, sin conceptos ajenos ("restricción de calendario", "requerimiento no funcional", SMART, historias de usuario…) y sin empezar con elogios. Una corrección por respuesta.
+- No mencionar a la alumna "fichas", "material", "fragmentos", "transcripciones", jerga interna ("punto de ruptura", "secuencia de corrección") ni números de sesión (la numeración interna no coincide con la del máster).
 - Corrección socrática para los ejercicios y respuesta directa para las dudas.
 - No inventar precios ni límites de herramientas; mandar a la web oficial.
 - Longitud: correcciones de menos de 30 segundos de lectura; explicaciones de unas 150-250 palabras.
@@ -92,6 +95,8 @@ Edita `SYSTEM_PROMPT` en `server.js`. Reglas que conviene mantener:
 ### Añadir material de Alba
 
 Añade entradas a `kb_docs.json` con la forma `{ "title": "...", "content": "...", "kind": "sesion" | "clase" }`. Los `.docx` se convierten con `pandoc archivo.docx -t plain`. Después, vuelve a desplegar. No hace falta tocar el código.
+- `"sesion"` = ficha de corrección escrita para el corrector (reglas, preguntas y secuencias). Va **siempre** entera en el system, así que cada ficha nueva encarece todas las llamadas.
+- `"clase"` = transcripción. Solo se añade cuando la pregunta está relacionada.
 
 ### Cambiar el diseño
 
@@ -115,6 +120,10 @@ curl -s -X POST localhost:3999/api/correct -H 'Content-Type: application/json' \
 Para probar sin gastar créditos, levanta un servidor HTTP que imite `/v1/messages` y arranca con `ANTHROPIC_BASE_URL=http://127.0.0.1:<puerto>`.
 
 Casos de prueba útiles después de cambiar el prompt:
+- **el caso de Alba:** "Te paso mi requerimiento para corregir: El cliente necesita tener su web publicada el 1 de enero de 2027". Debe responder con "Eso es el titular. Ahora dime qué tendrá que ocurrir…" y "¿Cómo vas a saber que está bien hecho?", sin conceptos ajenos al método;
+- requerimientos con marca, con "y" y con palabras subjetivas ("Montar reservas con Calendly", "se cree la factura y se envíe", "fácil de usar");
+- un MoSCoW con todo en M y titulares en vez de requerimientos;
+- un flujograma con un inicio no observable y un "o";
 - una duda que no esté en las transcripciones (webhook vs. API);
 - un ejercicio con fallo (un Zap que mira cada hora las ventas de ThriveCart para dar acceso en Kajabi);
 - una pregunta ajena al máster (una receta);
@@ -124,8 +133,12 @@ Casos de prueba útiles después de cambiar el prompt:
 
 - **SDK antiguo (`@anthropic-ai/sdk` 0.27).** Funciona porque el SDK envía los campos tal cual (`output_config` incluido). Si se actualiza, revisar la API de `messages.create`.
 - **Sonnet 5.5** razona antes de responder, y ese razonamiento cuenta dentro de `max_tokens`. No bajes de unos 4000 o las respuestas saldrán cortadas o vacías. No acepta `thinking: {type: "disabled"}`.
-- **Caché del prompt:** el prompt del sistema se cachea, pero el material de apoyo va en el mensaje de usuario y cambia en cada pregunta, así que eso no se cachea.
-- **Coste aproximado:** 0,03-0,04 $ por mensaje (10-15 mil tokens de entrada).
+- **Caché del prompt:** las instrucciones y las fichas (unos 75.000 tokens) se cachean 1 hora. Los fragmentos de clase y el historial (unos 9.000 tokens) cambian en cada pregunta y no se cachean.
+- **Coste aproximado con `claude-sonnet-5-5`:**
+  - mensaje con la caché activa: unos 0,04 $;
+  - el primer mensaje tras más de 1 hora sin actividad reescribe la caché: unos 0,30 $ más;
+  - en el peor caso, con actividad repartida todo el día, son unos 0,30 $ por hora activa en escrituras de caché.
+  - Revisa las líneas `uso` del log: `cache_read` debería ser de unos 75.000 en casi todas las llamadas.
 - **Sesiones de Claude Code en la nube:** la red del entorno tiene que permitir `backboard.railway.com`, `backboard.railway.app`, `railway.com` y `railway.app` (CLI de Railway); `*.up.railway.app` (para probar la URL pública); `mecanicadigital.com` (para consultar la web); y `fonts.googleapis.com` / `fonts.gstatic.com`.
 - **mecanicadigital.com** tiene un antibots (SiteGround) que a veces devuelve un captcha a `curl`. Funciona con un User-Agent de navegador y la cabecera `Referer`.
 
